@@ -1,6 +1,7 @@
 package app.pocketfoundry.core.saves
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
@@ -48,7 +49,7 @@ class GameFilesProvider : DocumentsProvider() {
     override fun queryChildDocuments(parentId: String, projection: Array<String>?, sortOrder: String?): Cursor =
         MatrixCursor(projection ?: DOCUMENT_COLUMNS).apply {
             file(parentId).listFiles()?.filterNot(::hidden)?.forEach { add(it) }
-            setNotificationUri(context!!.contentResolver, DocumentsContract.buildChildDocumentsUri(AUTHORITY, parentId))
+            setNotificationUri(context!!.contentResolver, DocumentsContract.buildChildDocumentsUri(authority, parentId))
         }
 
     override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor =
@@ -120,16 +121,18 @@ class GameFilesProvider : DocumentsProvider() {
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
     }
 
+    private val authority get() = authority(context!!)
+
     private fun changed(dir: File) =
-        context!!.contentResolver.notifyChange(DocumentsContract.buildChildDocumentsUri(AUTHORITY, id(dir)), null)
+        context!!.contentResolver.notifyChange(DocumentsContract.buildChildDocumentsUri(authority, id(dir)), null)
 
     companion object {
-        private const val AUTHORITY = "app.pocketfoundry.files"
+        fun authority(context: Context) = "${context.packageName}.files"
         private const val ROOT = "factorio"
 
         /** The folder in the phone's Files app, or in the file picker if that won't open. */
         fun open(activity: Activity) {
-            val root = DocumentsContract.buildRootUri(AUTHORITY, ROOT)
+            val root = DocumentsContract.buildRootUri(authority(activity), ROOT)
             runCatching { activity.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(root, Root.MIME_TYPE_ITEM)) }
                 .recoverCatching {
                     activity.startActivity(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE)

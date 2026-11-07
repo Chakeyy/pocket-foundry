@@ -21,7 +21,7 @@ object AudioBridge {
     private const val MAGIC = "PFA1"
     /** Two of SDL's 1024-frame chunks: the lag to the speaker. */
     private const val LAG_FRAMES = 2048
-    private const val READ_FRAMES = 256
+    private const val READ_FRAMES = 1024
 
     fun start(paths: Paths) = serve(paths.audioSocket) { client ->
         try {
@@ -32,6 +32,7 @@ object AudioBridge {
     }
 
     private fun play(input: DataInputStream) {
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         val (freq, channels) = readHeader(input)
         val track = newTrack(freq, channels)
         Log.i(TAG, "Audio: $freq Hz, $channels channels, buffer ${track.bufferSizeInFrames} of ${track.bufferCapacityInFrames} frames")

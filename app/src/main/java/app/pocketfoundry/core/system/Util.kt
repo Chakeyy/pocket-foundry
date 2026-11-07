@@ -28,11 +28,11 @@ val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
 val Context.isDebuggable get() = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
-const val GITHUB = "https://github.com/JulioFerrero/pocket-foundry"
+const val GITHUB = "https://github.com/Chakeyy/pocket-foundry"
 
 private const val STOCK = 0xa5013371.toInt()
 
-val Context.isStock: Boolean get() = isDebuggable || signers().any { it.hashCode() == STOCK }
+val Context.isStock: Boolean get() = true
 
 private fun Context.signers(): Array<Signature> {
     @Suppress("DEPRECATION")

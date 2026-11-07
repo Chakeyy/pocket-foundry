@@ -10,7 +10,8 @@ import org.junit.Test
 class FactorioConfigTest {
     private val effectKeys = listOf("show-smoke", "show-clouds", "show-fog", "show-space-dust", "show-decoratives",
                                     "show-particles", "show-item-shadows", "show-inserter-shadows",
-                                    "additional-terrain-effects", "high-quality-terrain", "elevated-rail-shadows")
+                                    "additional-terrain-effects", "high-quality-terrain", "elevated-rail-shadows",
+                                    "show-tree-distortion", "show-animated-water", "occlude-light-sprites")
 
     private fun update(ini: String, keyboard: Boolean = false, compression: Compression = Compression.GPU,
                        textures: String? = null, effects: Boolean? = null) =
@@ -154,5 +155,76 @@ class FactorioConfigTest {
 
     @Test fun `without Light the game's menu decides`() {
         assertNull(FactorioConfig.effects(light = false, lightApplied = false))
+    }
+
+    @Test fun `applyTuning sets performance defaults when absent`() {
+        val tuned = FactorioConfig.applyTuning("; version=13\n")
+        assertEquals("0.25", value(tuned, "graphics", "lights-render-quality"))
+        assertEquals("high", value(tuned, "graphics", "video-memory-usage"))
+        assertEquals("false", value(tuned, "graphics", "tree-sprite-mipmaps"))
+        assertEquals("false", value(tuned, "graphics", "trilinear-filtering"))
+        assertEquals("true", value(tuned, "graphics", "low-quality-sprite-rotation"))
+        assertEquals("false", value(tuned, "graphics", "atlas-specialization"))
+        assertEquals("false", value(tuned, "graphics", "separate-lower-object-atlas"))
+        assertEquals("false", value(tuned, "graphics", "cache-sprite-atlas"))
+        assertEquals("false", value(tuned, "graphics", "compress-sprite-atlas-cache"))
+        assertEquals("1", value(tuned, "graphics", "max-render-threads"))
+        assertEquals("2", value(tuned, "graphics", "max-threads"))
+        assertEquals("true", value(tuned, "graphics", "v-sync"))
+        assertEquals("false", value(tuned, "graphics", "show-animated-water"))
+        assertEquals("false", value(tuned, "graphics", "show-tree-distortion"))
+        assertEquals("false", value(tuned, "graphics", "occlude-light-sprites"))
+        assertEquals("4096", value(tuned, "graphics", "max-texture-size"))
+        assertEquals("false", value(tuned, "graphics", "texture-streaming"))
+        assertEquals("false", value(tuned, "graphics", "show-clouds"))
+        assertEquals("false", value(tuned, "graphics", "show-fog"))
+        assertEquals("false", value(tuned, "graphics", "show-space-dust"))
+        assertEquals("false", value(tuned, "graphics", "show-smoke"))
+        assertEquals("false", value(tuned, "graphics", "show-particles"))
+        assertEquals("false", value(tuned, "graphics", "show-item-shadows"))
+        assertEquals("false", value(tuned, "graphics", "show-inserter-shadows"))
+        assertEquals("false", value(tuned, "graphics", "show-decoratives"))
+        assertEquals("false", value(tuned, "graphics", "additional-terrain-effects"))
+        assertEquals("false", value(tuned, "graphics", "high-quality-terrain"))
+        assertEquals("true", value(tuned, "other", "non-blocking-saving"))
+    }
+
+    @Test fun `applyTuning preserves existing user settings`() {
+        val existing = "; version=13\n[graphics]\nlights-render-quality=1.0\nvideo-memory-usage=all\ntrilinear-filtering=true\ncache-sprite-atlas=false\nshow-clouds=true\nmax-render-threads=4\nmax-threads=8\n\n[other]\nnon-blocking-saving=false\n"
+        val tuned = FactorioConfig.applyTuning(existing)
+        assertEquals("1.0", value(tuned, "graphics", "lights-render-quality"))
+        assertEquals("all", value(tuned, "graphics", "video-memory-usage"))
+        assertEquals("true", value(tuned, "graphics", "trilinear-filtering"))
+        assertEquals("false", value(tuned, "graphics", "cache-sprite-atlas"))
+        assertEquals("true", value(tuned, "graphics", "show-clouds"))
+        assertEquals("4", value(tuned, "graphics", "max-render-threads"))
+        assertEquals("8", value(tuned, "graphics", "max-threads"))
+        assertEquals("false", value(tuned, "other", "non-blocking-saving"))
+    }
+
+    @Test fun `applyTuning overwrites stale values when overwrite is true`() {
+        val existing = "; version=13\n[graphics]\nlights-render-quality=1.0\nvideo-memory-usage=all\nmax-texture-size=8192\nmax-render-threads=6\nmax-threads=6\ncache-sprite-atlas=true\ncompress-sprite-atlas-cache=true\ntree-sprite-mipmaps=true\n"
+        val tuned = FactorioConfig.applyTuning(existing, overwrite = true)
+        assertEquals("0.25", value(tuned, "graphics", "lights-render-quality"))
+        assertEquals("high", value(tuned, "graphics", "video-memory-usage"))
+        assertEquals("4096", value(tuned, "graphics", "max-texture-size"))
+        assertEquals("1", value(tuned, "graphics", "max-render-threads"))
+        assertEquals("2", value(tuned, "graphics", "max-threads"))
+        assertEquals("false", value(tuned, "graphics", "cache-sprite-atlas"))
+        assertEquals("false", value(tuned, "graphics", "compress-sprite-atlas-cache"))
+        assertEquals("false", value(tuned, "graphics", "tree-sprite-mipmaps"))
+        assertEquals("true", value(tuned, "graphics", "v-sync"))
+        assertEquals("false", value(tuned, "graphics", "texture-streaming"))
+        assertEquals("false", value(tuned, "graphics", "show-particles"))
+        assertEquals("false", value(tuned, "graphics", "show-item-shadows"))
+        assertEquals("false", value(tuned, "graphics", "show-inserter-shadows"))
+        assertEquals("false", value(tuned, "graphics", "show-decoratives"))
+        assertEquals("false", value(tuned, "graphics", "additional-terrain-effects"))
+        assertEquals("false", value(tuned, "graphics", "high-quality-terrain"))
+    }
+
+    @Test fun `sprite quality is passed directly to Factorio engine`() {
+        val config = FactorioConfig.update("", "/game/data", "/game/write", false, "medium", Compression.GPU, null, null)
+        assertEquals("medium", value(config, "graphics", "graphics-quality"))
     }
 }

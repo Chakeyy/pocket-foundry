@@ -33,9 +33,28 @@ object Runtime {
         paths.prefix.deleteRecursively()
         context.assets.open("runtime.tar.xz").use { untarXz(it, paths.files) }
         paths.tmp.mkdirs()
+        fixIcdPaths(paths)
         stamp(paths).writeText(assetVersion(context))
         Drivers.forgetGames(context)
         DriverCheck.forget(context)
+    }
+
+    /** Updates library paths in Vulkan ICD and layer JSONs to match the installed package's data path. */
+    private fun fixIcdPaths(paths: Paths) {
+        val targets = listOf(
+            File(paths.lib, "hybris/hybris_icd.json"),
+            File(paths.lib, "hybris/VkLayer_khronos_timeline_semaphore.json"),
+            File(paths.prefix, "share/vulkan/icd.d/freedreno_icd.aarch64.json")
+        )
+        for (file in targets) {
+            runCatching {
+                if (file.exists()) {
+                    val text = file.readText()
+                    val fixed = text.replace(Regex("/data/data/[^/]+/files/usr/lib"), paths.lib.path)
+                    if (fixed != text) file.writeText(fixed)
+                }
+            }
+        }
     }
 
     /** Android's properties, from getprop, read once: those that matter here (ro.) don't change. */

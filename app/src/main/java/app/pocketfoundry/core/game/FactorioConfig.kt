@@ -8,12 +8,14 @@ import java.io.File
 
 /** Writes our settings into config.ini; the player's other settings stay. */
 object FactorioConfig {
+    private const val TUNING_VERSION = 9
     /** Without its version header Factorio calls the file invalid and offers a reset. */
     private const val VERSION_HEADER = "; version=13\n"
     /** The settings that halved what the CPU driver draws in a game; all on by default. */
     private val EFFECTS = listOf("show-smoke", "show-clouds", "show-fog", "show-space-dust", "show-decoratives",
                                  "show-particles", "show-item-shadows", "show-inserter-shadows", "additional-terrain-effects",
-                                 "high-quality-terrain", "elevated-rail-shadows")
+                                 "high-quality-terrain", "elevated-rail-shadows", "show-tree-distortion",
+                                 "show-animated-water", "occlude-light-sprites")
 
     fun write(context: Context, paths: Paths, keyboard: Boolean, compression: Compression) {
         val settings = Settings(context)
@@ -21,13 +23,62 @@ object FactorioConfig {
         val uncompressed = compression == Compression.NONE
         val old = if (paths.config.exists()) paths.config.readText() else ""
         // Factorio derives its paths from its executable (here the loader), so name them.
-        val config = update(old, File(paths.game, "data").path, paths.gameData.path, keyboard,
+        var config = update(old, File(paths.game, "data").path, paths.gameData.path, keyboard,
                             settings.spriteQuality, compression, textures(uncompressed, settings.uncompressedApplied),
                             effects(light, settings.lightApplied))
+        val forceTuning = settings.tuningVersion < TUNING_VERSION
+        config = applyTuning(config, forceTuning)
         paths.config.parentFile?.mkdirs()
         paths.config.writeText(config)
+        settings.tuningVersion = TUNING_VERSION
         settings.lightApplied = light
         settings.uncompressedApplied = uncompressed
+    }
+
+    /** Engine defaults tuned for mobile SoC performance (Mali and DynamIQ SoCs). Preserves existing values unless migrating. */
+    internal fun applyTuning(ini: String, overwrite: Boolean = false): String {
+        var config = ini
+        val graphicsDefaults = listOf(
+            "lights-render-quality" to "0.25",
+            "video-memory-usage" to "high",
+            "tree-sprite-mipmaps" to "false",
+            "trilinear-filtering" to "false",
+            "low-quality-sprite-rotation" to "true",
+            "atlas-specialization" to "false",
+            "separate-lower-object-atlas" to "false",
+            "cache-sprite-atlas" to "false",
+            "compress-sprite-atlas-cache" to "false",
+            "max-render-threads" to "1",
+            "max-threads" to "2",
+            "v-sync" to "true",
+            "show-animated-water" to "false",
+            "show-tree-distortion" to "false",
+            "occlude-light-sprites" to "false",
+            "max-texture-size" to "4096",
+            "texture-streaming" to "false",
+            "show-clouds" to "false",
+            "show-fog" to "false",
+            "show-space-dust" to "false",
+            "show-smoke" to "false",
+            "show-particles" to "false",
+            "show-item-shadows" to "false",
+            "show-inserter-shadows" to "false",
+            "show-decoratives" to "false",
+            "additional-terrain-effects" to "false",
+            "high-quality-terrain" to "false"
+        )
+        for ((key, value) in graphicsDefaults) {
+            if (overwrite || !Regex("(?m)^${Regex.escape(key)}=").containsMatchIn(config))
+                config = setIni(config, "graphics", key, value)
+        }
+        val otherDefaults = listOf(
+            "non-blocking-saving" to "true"
+        )
+        for ((key, value) in otherDefaults) {
+            if (overwrite || !Regex("(?m)^${Regex.escape(key)}=").containsMatchIn(config))
+                config = setIni(config, "other", key, value)
+        }
+        return config
     }
 
     /**

@@ -37,6 +37,8 @@ class ControllerView(context: Context, private val keyboard: Boolean) : View(con
     private val stepAside get() = (padInHand || keyboard) && !editor.active
     private val controlsShown get() = !stepAside && !layout.hidden
 
+    override fun hasOverlappingRendering(): Boolean = false
+
     init {
         reload()
     }
@@ -77,8 +79,27 @@ class ControllerView(context: Context, private val keyboard: Boolean) : View(con
         }
         val control = pressed[id] ?: return
         if (control.pointers[0] != id || !control.kind.follows) return
-        if (control.follow(x, y, layout)) haptic(TICK)
-        invalidate()
+        when (control.kind) {
+            is Kind.Stick -> {
+                val prevX = control.knobX
+                val prevY = control.knobY
+                control.follow(x, y, layout)
+                if (kotlin.math.abs(control.knobX - prevX) >= 0.5f || kotlin.math.abs(control.knobY - prevY) >= 0.5f) {
+                    invalidate()
+                }
+            }
+            Kind.Dpad -> {
+                val prevDpad = control.dpad
+                if (control.follow(x, y, layout)) haptic(TICK)
+                if (control.dpad != prevDpad) {
+                    invalidate()
+                }
+            }
+            else -> {
+                if (control.follow(x, y, layout)) haptic(TICK)
+                invalidate()
+            }
+        }
     }
 
     fun pointerUp(id: Int) {

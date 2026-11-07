@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <sched.h>
 // .xz decoding for NativeXzInputStream (Kotlin), on top of liblzma.
 #include <jni.h>
 #include <lzma.h>
@@ -48,4 +50,18 @@ Java_app_pocketfoundry_core_system_NativeXz_close(JNIEnv *env, jclass cls, jlong
     lzma_stream *s = (lzma_stream *) (intptr_t) handle;
     lzma_end(s);
     free(s);
+}
+
+JNIEXPORT jint JNICALL
+Java_app_pocketfoundry_core_system_NativeXz_setAffinity(JNIEnv *env, jclass cls, jint tid, jint mask) {
+    (void)env;
+    (void)cls;
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    for (int i = 0; i < 32; i++) {
+        if ((uint32_t)mask & (1U << i)) {
+            CPU_SET(i, &set);
+        }
+    }
+    return sched_setaffinity((pid_t)tid, sizeof(set), &set);
 }

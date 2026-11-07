@@ -10,4 +10,5 @@ object NativeXz {
     @JvmStatic external fun decode(handle: Long, input: ByteArray, inOff: Int, inLen: Int,
                                    out: ByteArray, outOff: Int, outLen: Int, inputEnded: Boolean): Long
     @JvmStatic external fun close(handle: Long)
+    @JvmStatic external fun setAffinity(tid: Int, mask: Int): Int
 }

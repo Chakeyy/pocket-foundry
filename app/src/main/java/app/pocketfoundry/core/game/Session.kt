@@ -6,8 +6,10 @@ import android.os.SystemClock
 import android.os.Vibrator
 import android.system.Os
 import android.system.OsConstants
+import android.util.Log
 import app.pocketfoundry.core.system.Paths
 import app.pocketfoundry.core.system.Settings
+import app.pocketfoundry.core.system.TAG
 import app.pocketfoundry.core.system.X11Prefs
 import app.pocketfoundry.core.controller.InputBridge
 import app.pocketfoundry.core.controller.gamepadConnected
@@ -15,11 +17,13 @@ import app.pocketfoundry.core.controller.gamepadVibrator
 import app.pocketfoundry.core.controller.keyboardConnected
 import app.pocketfoundry.core.drivers.DriverCheck
 import app.pocketfoundry.core.drivers.Drivers
+import app.pocketfoundry.core.system.NativeXz
 import app.pocketfoundry.core.system.mainHandler
 import app.pocketfoundry.core.saves.Saves
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.CopyOnWriteArrayList
@@ -181,7 +185,71 @@ object Session {
         val app = context.applicationContext
         thread(name = "pocketfoundry-game-exit", isDaemon = true) { onGameExit(app, driver, started, started.waitFor()) }
         watchForNoWindow(started, gamePid, paths.gameLog)
+        applyCpuAffinity(gamePid)
         context.startForegroundService(Intent(context, GameService::class.java))
+    }
+
+    @Volatile private var affinityPid: Int? = null
+
+    private fun applyCpuAffinity(pid: Int) {
+        if (affinityPid == pid) return
+        affinityPid = pid
+        thread(name = "pocketfoundry-affinity", isDaemon = true) {
+            runCatching {
+                android.os.Process.setThreadPriority(pid, android.os.Process.THREAD_PRIORITY_DISPLAY)
+            }
+            val taskset = File("/system/bin/taskset")
+            val cpus = java.lang.Runtime.getRuntime().availableProcessors()
+            // 8-core DynamIQ (6+2): core 7 (0x80) main loop, core 6 (0x40) Vulkan queue, cores 0-5 (0x3f) workers.
+            val bigMask = if (cpus == 8) 0xc0 else 0xf0
+            val workerMask = if (cpus == 8) 0x3f else 0xff
+
+            fun pinThreads() {
+                val taskDir = File("/proc/$pid/task")
+                val tids = taskDir.listFiles()?.mapNotNull { it.name.toIntOrNull() } ?: return
+                for (tid in tids) {
+                    val comm = runCatching { File(taskDir, "$tid/comm").readText().trim().lowercase(Locale.ROOT) }.getOrDefault("")
+                    val isRenderOrMain = tid == pid || comm.contains("glthread") || comm.contains("zcfq")
+                    val mask = if (cpus == 8) {
+                        when {
+                            tid == pid -> 0x80
+                            comm.contains("zcfq") || comm.contains("glthread") -> 0x40
+                            else -> 0x3f
+                        }
+                    } else {
+                        if (isRenderOrMain) bigMask else workerMask
+                    }
+                    val rc = try { NativeXz.setAffinity(tid, mask) } catch (_: Throwable) { -1 }
+                    if (rc != 0 && taskset.canExecute()) {
+                        runCatching { ProcessBuilder(taskset.path, "-p", mask.toString(16), tid.toString()).start().waitFor() }
+                    }
+                    runCatching {
+                        android.os.Process.setThreadPriority(
+                            tid,
+                            if (isRenderOrMain) android.os.Process.THREAD_PRIORITY_DISPLAY else android.os.Process.THREAD_PRIORITY_DEFAULT
+                        )
+                    }
+                }
+            }
+
+            runCatching {
+                pinThreads()
+                if (cpus == 8) {
+                    ScreenLog.add("cpu affinity: main pinned to 0x80, zcfq to 0x40, workers to 0x3f")
+                } else {
+                    ScreenLog.add("cpu affinity: main/render threads pinned to 0x${bigMask.toString(16)}, workers to 0x${workerMask.toString(16)}")
+                }
+            }.onFailure {
+                Log.w(TAG, "Couldn't set CPU affinity for pid $pid", it)
+            }
+
+            // Recurring daemon loop to catch dynamic threads spawned during gameplay.
+            while (state == State.RUNNING && gamePid == pid) {
+                SystemClock.sleep(5_000L)
+                if (state != State.RUNNING || gamePid != pid) break
+                runCatching { pinThreads() }
+            }
+        }
     }
 
     private fun gameEnvironment(context: Context, paths: Paths, driver: String): Map<String, String> {
@@ -250,6 +318,7 @@ object Session {
         wm?.destroy()
         xServer?.destroy()
         game = null; wm = null; xServer = null
+        affinityPid = null
         lastFailure = if (quitting || status == 0) null else status
         // Killed by a signal before its window opened: the driver crashed starting, like one that opens no window.
         if (lastFailure != null && !windowOpened && status > SIGNALLED) noWindow = true
@@ -269,16 +338,34 @@ object Session {
      */
     private fun watchForNoWindow(process: Process, pid: Int, log: File) = thread(name = "pocketfoundry-game-window", isDaemon = true) {
         val deadline = System.currentTimeMillis() + WINDOW_TIMEOUT_MS
+        var offset = 0L
         while (process.isAlive && System.currentTimeMillis() < deadline) {
-            val text = runCatching { log.readText() }.getOrDefault("")
-            if (WINDOW_OPENED in text) {
-                windowOpened = true
-                return@thread
-            }
-            if (NO_WINDOW.any { it in text }) {
-                noWindow = true
-                Os.kill(pid, OsConstants.SIGKILL)
-                return@thread
+            val length = log.length()
+            if (length > offset) {
+                val text = runCatching {
+                    RandomAccessFile(log, "r").use { raf ->
+                        val seekPos = (offset - 256).coerceAtLeast(0L)
+                        raf.seek(seekPos)
+                        val bytes = ByteArray((length - seekPos).toInt().coerceAtMost(65536))
+                        val read = raf.read(bytes)
+                        if (read > 0) {
+                            offset = seekPos + read
+                            String(bytes, 0, read)
+                        } else ""
+                    }
+                }.getOrDefault("")
+
+                if (text.contains(WINDOW_OPENED)) {
+                    windowOpened = true
+                    ScreenLog.add("the game opened its window")
+                    applyCpuAffinity(pid)
+                    return@thread
+                }
+                if (NO_WINDOW.any { it in text }) {
+                    noWindow = true
+                    Os.kill(pid, OsConstants.SIGKILL)
+                    return@thread
+                }
             }
             Thread.sleep(LOG_POLL_MS)
         }
@@ -294,7 +381,7 @@ object Session {
 object Glibc {
     fun start(paths: Paths, command: List<String>, log: File, extra: Map<String, String> = emptyMap(),
               libraries: File? = null, append: Boolean = false): Process {
-        val libraryPath = listOfNotNull(paths.lib, libraries).joinToString(":") { it.path }
+        val libraryPath = listOfNotNull(paths.lib, File(paths.lib, "hybris"), libraries).joinToString(":") { it.path }
         val pb = ProcessBuilder(listOf(paths.loader.path, "--library-path", libraryPath) + command)
         pb.environment().apply {
             clear()
@@ -303,11 +390,14 @@ object Glibc {
             put("XDG_RUNTIME_DIR", paths.tmp.path)
             put("PATH", "/system/bin")
             put("LANG", "C.UTF-8")
+            put("LOCPATH", File(paths.lib, "locale").path)
             put("XLOCALEDIR", File(paths.prefix, "share/X11/locale").path)
             put("TZ", posixTimeZone(TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000))
             // No /tmp on Android, so name the socket itself.
             put("DISPLAY", paths.xSocket.path)
             put("GCONV_PATH", File(paths.lib, "gconv").path)
+            put("MESA_SHADER_CACHE_DIR", File(paths.files, "shader_cache").apply { mkdirs() }.path)
+            put("MESA_SHADER_CACHE_MAX_SIZE", "512M")
             put("SDL_VIDEO_DRIVER", "x11")
             // The game's built-in SDL hands everything to ours (runtime/sdl), which has the app's sound and gamepad.
             put("SDL3_DYNAMIC_API", File(paths.lib, "libSDL3.so.0").path)

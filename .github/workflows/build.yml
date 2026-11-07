@@ -1,0 +1,120 @@
+name: Build APK
+
+on:
+  push:
+    branches:
+      - core-tuning
+      - main
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Revision suffix (e.g. 2 or r2; leave blank to use gradle.properties)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Android NDK & CMake
+        run: |
+          echo "y" | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Apply Termux:X11 patches
+        run: |
+          for p in third_party/patches/termux-x11/*.patch; do
+            if git -C third_party/termux-x11 apply --reverse --check "../../$p" 2>/dev/null; then
+              echo "already applied: $(basename "$p")"
+            else
+              git -C third_party/termux-x11 apply "../../$p"
+              echo "applied: $(basename "$p")"
+            fi
+          done
+
+      - name: Extract Runtime Assets from upstream release
+        run: |
+          mkdir -p runtime/out/apk/assets runtime/out/apk/jniLibs/arm64-v8a
+          curl -sSL -o /tmp/upstream.apk https://github.com/JulioFerrero/pocket-foundry/releases/download/v0.8.16/pocket-foundry-0.8.16.apk
+          unzip -q -p /tmp/upstream.apk assets/runtime.tar.xz > runtime/out/apk/assets/runtime.tar.xz
+          unzip -q -p /tmp/upstream.apk assets/runtime.version > runtime/out/apk/assets/runtime.version
+          unzip -q -p /tmp/upstream.apk lib/arm64-v8a/libld-linux.so > runtime/out/apk/jniLibs/arm64-v8a/libld-linux.so
+          chmod +x runtime/out/apk/jniLibs/arm64-v8a/libld-linux.so
+          ls -la runtime/out/apk/assets runtime/out/apk/jniLibs/arm64-v8a
+
+      - name: Determine Version and Revision
+        run: |
+          VERSION=$(grep '^versionName=' gradle.properties | cut -d'=' -f2 | tr -d ' \r\n')
+          INPUT_REV="${{ github.event.inputs.revision }}"
+          if [ -n "$INPUT_REV" ]; then
+            REV="$INPUT_REV"
+          else
+            REV=$(grep '^revision=' gradle.properties | cut -d'=' -f2 | tr -d ' \r\n')
+          fi
+          if [ -z "$REV" ]; then REV="1"; fi
+          REV_TAG="r${REV#r}"
+          APK_NAME="pocket-foundry-tuning-${VERSION}-${REV_TAG}.apk"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "REV_TAG=${REV_TAG}" >> $GITHUB_ENV
+          echo "APK_NAME=${APK_NAME}" >> $GITHUB_ENV
+          echo "Building: ${APK_NAME} (tag: v${VERSION}-${REV_TAG})"
+
+      - name: Run Unit Tests
+        run: |
+          chmod +x gradlew
+          ./gradlew test -Prevision="${{ env.REV_TAG }}" --stacktrace
+
+      - name: Build Release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -Prevision="${{ env.REV_TAG }}" --stacktrace
+
+      - name: Prepare APK Output
+        run: |
+          mkdir -p build-output
+          cp app/build/outputs/apk/release/app-release.apk "build-output/${{ env.APK_NAME }}"
+          cd build-output
+          sha256sum "${{ env.APK_NAME }}" > "${{ env.APK_NAME }}.sha256"
+          cd ..
+          ls -la build-output/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: build-output/${{ env.APK_NAME }}
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/core-tuning' || github.ref == 'refs/heads/main'
+        with:
+          tag_name: v${{ env.VERSION }}-${{ env.REV_TAG }}
+          name: Pocket Foundry Core Tuning (v${{ env.VERSION }}-${{ env.REV_TAG }})
+          body: |
+            Pocket Foundry Custom Build with hardware optimizations for Mali/DynamIQ SoCs.
+            - Revision: ${{ env.REV_TAG }}
+            - Package Name: `app.pocketfoundry.tuning` (co-exists with official APK)
+            - Version Code: 38
+            - Signed with persistent custom release keystore.
+          draft: false
+          prerelease: false
+          files: |
+            build-output/${{ env.APK_NAME }}
+            build-output/${{ env.APK_NAME }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

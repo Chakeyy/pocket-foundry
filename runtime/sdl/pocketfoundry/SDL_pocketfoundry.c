@@ -139,7 +139,7 @@ static bool POCKETFOUNDRYAUDIO_OpenDevice(SDL_AudioDevice *device)
     SDL_UpdatedAudioDeviceFormat(device);
 
     // A couple of buffers in flight at most, so sound stays in sync with the game.
-    sndbuf = device->buffer_size * 2;
+    sndbuf = device->buffer_size * 4;
     setsockopt(device->hidden->fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
     SDL_memcpy(header, AUDIO_MAGIC, 4);

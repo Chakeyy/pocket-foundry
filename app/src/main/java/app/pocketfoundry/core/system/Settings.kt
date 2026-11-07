@@ -22,6 +22,7 @@ class Settings(private val context: Context) {
     /** The release whose What's new already showed on start: it shows once. */
     var updateShown by prefs.string("updateShown", "")
     var border by prefs.int("border", 0)
+    var tuningVersion by prefs.int("tuningVersion", 0)
     /** Factorio's graphics-quality, missing from its menus: "medium" halves the sprites, ~600 MB less memory. */
     var spriteQuality by prefs.string(SPRITE_QUALITY, "high")
     /** Factorio's extra effects off (smoke, clouds, decoratives, shadows, terrain effects…): fewer pixels to draw. */

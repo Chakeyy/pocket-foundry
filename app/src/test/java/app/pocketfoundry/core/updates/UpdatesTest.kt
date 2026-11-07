@@ -38,6 +38,14 @@ class UpdatesTest {
         assertEquals(0, Updates.compareVersions("0.7.5-beta", "0.7.0"))
     }
 
+    @Test fun `revision parts compare correctly`() {
+        assertTrue(Updates.compareVersions("0.8.16-r2", "0.8.16-r1") > 0)
+        assertTrue(Updates.compareVersions("0.8.16-tuning-r2", "0.8.16-tuning-r1") > 0)
+        assertTrue(Updates.compareVersions("0.8.16-r1", "0.8.16") > 0)
+        assertTrue(Updates.compareVersions("0.8.17-r1", "0.8.16-r2") > 0)
+        assertEquals(0, Updates.compareVersions("0.8.16-r1", "0.8.16-r1"))
+    }
+
     @Test fun `changes are the Since list as plain text`() {
         val notes = """
             Play your own copy of Factorio on Android.

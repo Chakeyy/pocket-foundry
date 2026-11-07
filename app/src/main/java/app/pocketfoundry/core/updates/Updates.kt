@@ -22,8 +22,8 @@ object Updates {
     /** [changes]: what each version since the installed one brought, newest first. */
     class Release(val version: String, val apk: String, val checksum: String, val changes: List<Pair<String, List<String>>>)
 
-    private const val RELEASES = "https://api.github.com/repos/JulioFerrero/pocket-foundry/releases?per_page=50"
-    private const val INSTALLED = "app.pocketfoundry.UPDATE_INSTALLED"
+    private const val RELEASES = "https://api.github.com/repos/Chakeyy/pocket-foundry/releases?per_page=50"
+    private fun installedAction(context: Context) = "${context.packageName}.UPDATE_INSTALLED"
 
     /** The newer release [check] found, if any. */
     @Volatile var available: Release? = null
@@ -55,10 +55,14 @@ object Updates {
                        releases.map { (v, json) -> v to changes(json.optString("body")) })
     }
 
-    /** 0.6.10 after 0.6.9: compared number by number. */
+    /** 0.6.10 after 0.6.9: compared number by number, with revision tags (-r2) normalized to sub-versions. */
     internal fun compareVersions(a: String, b: String): Int {
-        val x = a.split('.').map { it.toIntOrNull() ?: 0 }
-        val y = b.split('.').map { it.toIntOrNull() ?: 0 }
+        fun normalize(v: String): List<Int> {
+            val clean = v.replace(Regex("[-_]?(?:tuning[-_]?)?r(\\d+)", RegexOption.IGNORE_CASE), ".$1")
+            return clean.split('.').map { it.toIntOrNull() ?: 0 }
+        }
+        val x = normalize(a)
+        val y = normalize(b)
         for (i in 0 until maxOf(x.size, y.size)) {
             val c = x.getOrElse(i) { 0 }.compareTo(y.getOrElse(i) { 0 })
             if (c != 0) return c
@@ -122,8 +126,9 @@ object Updates {
                 file.inputStream().use { it.copyTo(output) }
                 session.fsync(output)
             }
-            ContextCompat.registerReceiver(app, InstallResult(app, onFailure), IntentFilter(INSTALLED), ContextCompat.RECEIVER_NOT_EXPORTED)
-            val status = PendingIntent.getBroadcast(app, id, Intent(INSTALLED).setPackage(app.packageName),
+            val action = installedAction(app)
+            ContextCompat.registerReceiver(app, InstallResult(app, onFailure), IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
+            val status = PendingIntent.getBroadcast(app, id, Intent(action).setPackage(app.packageName),
                                                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
             session.commit(status.intentSender)
         }

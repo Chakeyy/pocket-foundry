@@ -16,11 +16,9 @@ import app.pocketfoundry.core.game.GameImport
 import app.pocketfoundry.core.game.Runtime
 import app.pocketfoundry.core.game.ScreenLog
 import app.pocketfoundry.core.game.Session
-import app.pocketfoundry.core.system.GITHUB
 import app.pocketfoundry.core.system.Paths
 import app.pocketfoundry.core.system.Settings
 import app.pocketfoundry.core.system.X11Prefs
-import app.pocketfoundry.core.system.isStock
 import app.pocketfoundry.ui.screens.launcher.HomeScreen
 import app.pocketfoundry.ui.screens.launcher.ImportScreen
 import app.pocketfoundry.ui.screens.launcher.SettingsScreen
@@ -96,15 +94,6 @@ class LauncherActivity : Activity() {
 
     private fun checkBuild() {
         checked = true
-        if (isStock) return
-        val github = button(this, "GitHub", Tone.GREEN, Arrow.RIGHT) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB))) }
-        host.show("Modified copy", 460, "Continue", github) {
-            add(stack(this@LauncherActivity, Frame.SHALLOW, padding = 12, gap = 6) {
-                add(label(this@LauncherActivity, "This isn't the official Pocket Foundry", 16f, weight = 600))
-                add(label(this@LauncherActivity, "Someone changed it, and their code runs with your saves and factorio.com " +
-                          "login. The real one is free on GitHub.", 14f, Factorio.MUTED))
-            })
-        }
     }
 
     override fun onStart() {

@@ -6,11 +6,13 @@ android {
     ndkVersion '29.0.14206865'   // same NDK as :lorie (termux-x11/lorie/version.gradle), so one NDK builds both
 
     defaultConfig {
-        applicationId 'app.pocketfoundry'
+        applicationId 'app.pocketfoundry.tuning'
         minSdk 29
         targetSdk 34
         versionCode project.versionCode.toInteger()   // both in gradle.properties
-        versionName project.versionName
+        def rev = project.findProperty('revision')?.toString()?.trim() ?: '1'
+        def revTag = rev.startsWith('r') ? rev : "r${rev}"
+        versionName "${project.versionName}-${revTag}"
         ndk { abiFilters 'arm64-v8a' }
     }
 
@@ -27,7 +29,7 @@ android {
 
     // The release key signs debug builds too, so either installs over the other and the imported game stays.
     // Its paths start at the repo root, as in tools/release.sh.
-    def signing = rootProject.file(System.getenv('POCKETFOUNDRY_SIGNING') ?: '../pocketfoundry-keys/keystore.properties')
+    def signing = rootProject.file(System.getenv('POCKETFOUNDRY_SIGNING') ?: 'signing/keystore.properties')
     if (signing.exists()) {
         def key = new Properties()
         signing.withInputStream { key.load(it) }

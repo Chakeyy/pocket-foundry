@@ -1,0 +1,103 @@
+diff --git a/lorie/src/main/cpp/lorie/InitOutput.c b/lorie/src/main/cpp/lorie/InitOutput.c
+index ac955b6..a43bfad 100644
+--- a/lorie/src/main/cpp/lorie/InitOutput.c
++++ b/lorie/src/main/cpp/lorie/InitOutput.c
+@@ -1173,6 +1173,8 @@ void loriePresentAfterFlip(__unused RRCrtcPtr crtc, uint64_t event_id, uint64_t
+     RegionReset(DamageRegion(pvfb->damage), &box);
+     pvfb->current_msc = min(pvfb->current_msc + 1, target_msc);
+     present_event_notify(event_id, ust, pvfb->current_msc);
++    QueueWorkProc(lorieRedraw, NULL, NULL);
++    lorieWakeServer();
+ }
+ 
+ void loriePresentUnflip(__unused ScreenPtr screen, uint64_t event_id) {
+diff --git a/lorie/src/main/cpp/lorie/cmdentrypoint.cpp b/lorie/src/main/cpp/lorie/cmdentrypoint.cpp
+index ef06476..fd74454 100644
+--- a/lorie/src/main/cpp/lorie/cmdentrypoint.cpp
++++ b/lorie/src/main/cpp/lorie/cmdentrypoint.cpp
+@@ -106,9 +106,11 @@ static jboolean start(JNIEnv *env, jobject self, jobjectArray args) {
+ 
+     {
+         cpu_set_t mask;
++        CPU_ZERO(&mask);
+         long num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
++        long limit = (num_cpus == 8) ? 6 : num_cpus;
+ 
+-        for (int i = num_cpus/2; i < num_cpus; i++)
++        for (int i = 0; i < limit; i++)
+             CPU_SET(i, &mask);
+ 
+         if (sched_setaffinity(0, sizeof(cpu_set_t), &mask) == -1)
+diff --git a/lorie/src/main/cpp/lorie/renderer.cpp b/lorie/src/main/cpp/lorie/renderer.cpp
+index ef6f3a8..2d5766d 100644
+--- a/lorie/src/main/cpp/lorie/renderer.cpp
++++ b/lorie/src/main/cpp/lorie/renderer.cpp
+@@ -1197,9 +1197,11 @@ void Renderer::redrawLocked(bool* waitingForBuffers) {
+     float sourceLeft = panSourceLeft, sourceTop = panSourceTop;
+ 
+     glDisable(GL_SCISSOR_TEST);
+-    glViewport(0, 0, surfaceW, surfaceH);
+-    glClearColor(0.f, 0.f, 0.f, 1.f);
+-    glClear(GL_COLOR_BUFFER_BIT);
++    if (renderViewportX != 0 || renderViewportY != 0 || renderViewportW != surfaceW || renderViewportH != surfaceH) {
++        glViewport(0, 0, surfaceW, surfaceH);
++        glClearColor(0.f, 0.f, 0.f, 1.f);
++        glClear(GL_COLOR_BUFFER_BIT);
++    }
+     glViewport(renderViewportX, surfaceH - renderViewportY - renderViewportH, renderViewportW, renderViewportH);
+ 
+     reportViewport(renderViewportX, renderViewportY, renderViewportW, renderViewportH,
+@@ -1221,9 +1223,6 @@ void Renderer::redrawLocked(bool* waitingForBuffers) {
+                (sourceLeft + sourceWidth) / (float) desc->width * xfactor,
+                (sourceTop + sourceHeight) / (float) desc->height,
+                LorieBuffer_isRgba(buffer));
+-    fence = eglCreateSyncKHR(egl_display, EGL_SYNC_FENCE_KHR, nullptr);
+-    glFlush();
+-
+     if (state->cursor.updated) {
+         __android_log_print(ANDROID_LOG_DEBUG, "gles-renderer", "Xlorie: updating cursor\n");
+         lorie_mutex_lock(&state->cursor.lock, &state->cursor.lockingPid, connFd());
+@@ -1235,13 +1234,14 @@ void Renderer::redrawLocked(bool* waitingForBuffers) {
+ 
+     state->cursor.moved = FALSE;
+     drawCursor(sourceWidth, sourceHeight, sourceLeft, sourceTop, cursorX, cursorY);
+-    glFlush();
+-
+-    // Wait until root window drawing is finished before giving control back to X server
+-    waitForFence(egl_display, fence, 0);
+     if (gpuCopySerial) {
++        fence = eglCreateSyncKHR(egl_display, EGL_SYNC_FENCE_KHR, nullptr);
++        glFlush();
++        waitForFence(egl_display, fence, 0);
+         __atomic_store_n(&state->gpuCopyQueue.completedSerial, gpuCopySerial, __ATOMIC_RELEASE);
+         notifyGpuCopyDone();
++    } else {
++        glFlush();
+     }
+     state->waitForNextFrame = true;
+     lorie_mutex_unlock(&state->lock, &state->lockingPid);
+@@ -1249,15 +1249,6 @@ void Renderer::redrawLocked(bool* waitingForBuffers) {
+     if (eglSwapBuffers(egl_display, sfc) != EGL_TRUE)
+         printEglError("Failed to swap buffers", __LINE__);
+ 
+-    // Perform a little drawing operation to make sure the next buffer is ready on the next invocation of drawing
+-    glEnable(GL_SCISSOR_TEST);
+-    glScissor(0, 0, 1, 1);
+-    glClearColor(0, 0, 0, 0);
+-    glClear(GL_COLOR_BUFFER_BIT);
+-    glDisable(GL_SCISSOR_TEST);
+-    fence = eglCreateSyncKHR(egl_display, EGL_SYNC_FENCE_KHR, nullptr);
+-    waitForFence(egl_display, fence, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR);
+-
+     state->renderedFrames++;
+ }
+ 
+@@ -1463,7 +1454,7 @@ void Renderer::drawRegion(GLuint id, float x0, float y0, float x1, float y1, flo
+     glVertexAttribPointer(c, 2, GL_FLOAT, GL_FALSE, 16, &coords[2]);
+     glEnableVertexAttribArray(p);
+     glEnableVertexAttribArray(c);
+-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); checkGlError();
++    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+ }
+ 
+ void Renderer::drawCursor(float displayWidth, float displayHeight, float sourceLeft, float sourceTop, float cursorX, float cursorY) {

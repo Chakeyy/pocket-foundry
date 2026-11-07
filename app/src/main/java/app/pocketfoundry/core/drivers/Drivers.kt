@@ -156,6 +156,7 @@ object Drivers {
         // needs and the driver may lack, like null descriptors on Mali.
         PHONE -> mapOf("VK_DRIVER_FILES" to File(paths.lib, "hybris/hybris_icd.json").path,
                        "VK_LAYER_PATH" to File(paths.lib, "hybris").path,
+                       "HYBRIS_LINKER_DIR" to File(paths.lib, "hybris/libhybris/linker").path,
                        "HYBRIS_PROPERTY_FILE" to paths.androidProperties.path,
                        // Android 10's linker config is named by it: libhybris's linker can't read properties.
                        "HYBRIS_VNDK_VERSION" to Runtime.properties["ro.vndk.version"].orEmpty(),
@@ -165,7 +166,8 @@ object Drivers {
         CPU -> mapOf("LIBGL_ALWAYS_SOFTWARE" to "1", "MESA_LOADER_DRIVER_OVERRIDE" to "llvmpipe",
                      "GALLIUM_DRIVER" to "llvmpipe", "LP_NATIVE_VECTOR_WIDTH" to "256", "LP_PERF" to "no_mip_linear")
         // Imported drivers lack our wait-before-present patch; the software path waits for the GPU instead.
-        else -> mapOf("VK_DRIVER_FILES" to File(paths.drivers, "$id/icd.json").path, "MESA_VK_WSI_DEBUG" to "sw")
+        else -> mapOf("VK_DRIVER_FILES" to File(paths.drivers, "$id/icd.json").path, "MESA_VK_WSI_DEBUG" to "sw") +
+                if (Gpu.mali) MALI else emptyMap()
     }
 
     /**
@@ -175,9 +177,22 @@ object Drivers {
      * The compat layer's stand-in for the BC textures Malis lack failed on every one Factorio made (a G925, and the
      * vivo with it forced): Mesa unpacks them itself instead.
      */
-    private val MALI = mapOf("MESA_GL_VERSION_OVERRIDE" to "3.3",
-                             "MESA_EXTENSION_OVERRIDE" to "+GL_ARB_instanced_arrays",
-                             "HYBRIS_BC_TEXTURES" to "0")
+    private val MALI = mapOf(
+        "MESA_GL_VERSION_OVERRIDE" to "3.3",
+        "MESA_EXTENSION_OVERRIDE" to "+GL_ARB_instanced_arrays",
+        "HYBRIS_BC_TEXTURES" to "0",
+        "HYBRIS_BC_TRANSCODE_QUALITY" to "fast",
+        "MESA_NO_ERROR" to "1",
+        "mesa_glthread" to "false",
+        "MESA_GLTHREAD" to "false",
+        "mesa_glthread_driver" to "false",
+        "ZINK_DESCRIPTORS" to "lazy",
+        "ZINK_DEBUG" to "compact,rp",
+        "ZINK_INLINE_UNIFORMS" to "0",
+        "zink_emulate_point_smooth" to "false",
+        "disable_throttling" to "false",
+        "MESA_DISK_CACHE_SINGLE_FILE" to "0"
+    )
 
     /** The libraries an imported driver brought, searched after the runtime's. */
     fun libraries(paths: Paths, id: String): File? = if (id in BUNDLED) null else File(paths.drivers, id)

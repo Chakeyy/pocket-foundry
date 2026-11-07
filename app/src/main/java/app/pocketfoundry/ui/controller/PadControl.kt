@@ -142,8 +142,10 @@ class Control(
         knobY = originY + dy
         val ax = (dx / r * InputBridge.AXIS_MAX).toInt()
         val ay = (dy / r * InputBridge.AXIS_MAX).toInt()
-        if (ax != sentX) { sentX = ax; InputBridge.axis(stick.axisX, ax) }
-        if (ay != sentY) { sentY = ay; InputBridge.axis(stick.axisY, ay) }
+        val stepX = kotlin.math.abs(ax - sentX) >= 128 || (ax == 0 && sentX != 0) || (kotlin.math.abs(ax) == InputBridge.AXIS_MAX && sentX != ax)
+        val stepY = kotlin.math.abs(ay - sentY) >= 128 || (ay == 0 && sentY != 0) || (kotlin.math.abs(ay) == InputBridge.AXIS_MAX && sentY != ay)
+        if (stepX) { InputBridge.axis(stick.axisX, ax); sentX = ax }
+        if (stepY) { InputBridge.axis(stick.axisY, ay); sentY = ay }
     }
 
     /** Returns whether a direction went down. */
